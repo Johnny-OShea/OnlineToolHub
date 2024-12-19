@@ -4,7 +4,11 @@ import { grayScale } from '../services/ImageService'
 const Home = () => {
 	// Create a ref to access the file input element directly
 	const fileInputRef = useRef()
-	
+
+	const handleUpload = () => {
+		fileInputRef.current.click();
+	};
+
 	const handleChange = (event) => {
 	  const files = event.target.files;
 
@@ -43,42 +47,21 @@ const Home = () => {
 
 	return (
 	    <div className="home-container">
-	      <div className="home-grid">
-	        {/* Left Column */}
-	        <div className="home-left">
-	          <h1 className="heading large">Welcome to Online Tool Hub</h1>
-	          <p className="paragraph">
-	            Use our tools to enhance your images.
-	          </p>
-	          <div className="button-group">
-	            <a href="#" className="button w-button">
-	              Free Trial
-	            </a>
-	            <a href="#learn-more" className="button-secondary w-button">
-	              Learn More
-	            </a>
-	          </div>
-	        </div>
+	      <button
+	        className="button upload-button w-button"
+	        onClick={handleUpload}
+	      >
+	        Upload Images
+	      </button>
 
-	        {/* Right Column */}
-	        <div className="home-right">
-	          <button
-	            className="button upload-button w-button"
-	            onClick={() => fileInputRef.current.click()}
-	          >
-	            Upload Images
-	          </button>
-
-	          {/* Hidden file input */}
-	          <input
-	            type="file"
-	            multiple
-	            ref={fileInputRef}
-	            onChange={handleChange}
-	            hidden
-	          />
-	        </div>
-	      </div>
+	      {/* Hidden file input */}
+	      <input
+	        type="file"
+	        multiple
+	        ref={fileInputRef}
+	        onChange={handleChange}
+	        hidden
+	      />
 	    </div>
 	  );
 	};
