@@ -54,4 +54,10 @@ public class ImageController {
             return ResponseEntity.status(500).body("Error processing images");
         }
     }
+    
+    @GetMapping("/api/hello")
+    @CrossOrigin("*")
+    public String helloWorld() {
+        return "Hello World!";
+    }
 }
