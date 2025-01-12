@@ -42,6 +42,11 @@ import com.onlinetoolhub.OnlineToolHub.service.ImageService;
 
 import jakarta.annotation.PostConstruct;
 
+/**
+ * Implementation of {@link ImageService} that uses Azure Cognitive Services
+ * and OpenAI to generate image captions, then packages the processed images
+ * into a single ZIP file.
+ */
 @Service
 public class ImageServiceImpl implements ImageService {
 
@@ -59,35 +64,43 @@ public class ImageServiceImpl implements ImageService {
     @Value("${azure.openai.key}")
     private String openAiKey;
 
+    /**
+     * The ID or deployment name for the OpenAI model (e.g., GPT-3.5) used
+     * to refine image captions.
+     */
     private String deploymentOrModelId = "gpt-35-turbo-alttext-service";
 
     private OpenAIClient chatGpt;
     private ImageAnalysisClient visionClient;
 
+    /**
+     * Initializes the OpenAIClient and the ImageAnalysisClient after the bean is constructed.
+     */
     @PostConstruct
     public void init() {
-        // Initialize the OpenAIClient once during bean initialization
-        chatGpt = new OpenAIClientBuilder().endpoint(openAiEndpoint).credential(new KeyCredential(openAiKey))
+        // Initialize the OpenAIClient once
+        chatGpt = new OpenAIClientBuilder()
+                .endpoint(openAiEndpoint)
+                .credential(new KeyCredential(openAiKey))
                 .buildClient();
 
-        // Initialize the ImageAnalysisClient once during bean initialization
-        visionClient = new ImageAnalysisClientBuilder().endpoint(visualAiEndpoint)
-                .credential(new KeyCredential(visualAiKey)).buildClient();
+        // Initialize the ImageAnalysisClient once
+        visionClient = new ImageAnalysisClientBuilder()
+                .endpoint(visualAiEndpoint)
+                .credential(new KeyCredential(visualAiKey))
+                .buildClient();
     }
 
     /**
-     * This method fetches dense captions, tags, and brands from Azure's Vision API,
-     * combines them, and uses OpenAI to generate a refined image description.
+     * Fetches dense captions, tags, and text from Azure's Vision API, then
+     * combines them into a prompt for OpenAI to generate a refined image caption.
      *
-     * @param image
-     *        The MultipartFile image to analyze.
-     * @return A descriptive caption of the image.
-     * @throws IOException
-     *         if an error occurs during the process.
+     * @param image the {@link MultipartFile} to be analyzed
+     * @return a descriptive caption of the image
+     * @throws IOException if an error occurs during file I/O
      */
     @Override
     public String getCaption(MultipartFile image) throws IOException {
-        // Ensure that the endpoint and key are available
         if (visualAiEndpoint == null || visualAiKey == null) {
             throw new IllegalStateException("Missing Azure Cognitive endpoint or subscription key.");
         }
@@ -99,12 +112,14 @@ public class ImageServiceImpl implements ImageService {
         }
 
         try {
-            // Generate captions, tags, and brands for the input image
-            ImageAnalysisResult result = visionClient.analyze(BinaryData.fromFile(tempFile.toPath()),
-                    Arrays.asList(VisualFeatures.DENSE_CAPTIONS, VisualFeatures.TAGS, VisualFeatures.READ),
-                    new ImageAnalysisOptions().setGenderNeutralCaption(true));
+            // Analyze the image with Azure Vision API
+            ImageAnalysisResult result = visionClient.analyze(
+                BinaryData.fromFile(tempFile.toPath()),
+                Arrays.asList(VisualFeatures.DENSE_CAPTIONS, VisualFeatures.TAGS, VisualFeatures.READ),
+                new ImageAnalysisOptions().setGenderNeutralCaption(true)
+            );
 
-            // Parse the analysis result and return a refined description
+            // Parse and refine the analysis result into a final description
             return parseAnalysisResult(result);
 
         } catch (Exception e) {
@@ -119,100 +134,101 @@ public class ImageServiceImpl implements ImageService {
     }
 
     /**
-     * Parses the ImageAnalysisResult to extract captions, tags, categories, and
-     * brands, and uses OpenAI to generate a refined image description.
+     * Parses the image analysis result to extract captions, tags, and text,
+     * then calls OpenAI to generate a final refined caption.
      *
-     * @param result
-     *        The result from the image analysis.
-     * @return A refined image description.
+     * @param result the result object from Azure Vision API
+     * @return a refined, concise description of the image
      */
     private String parseAnalysisResult(ImageAnalysisResult result) {
         StringBuilder sb = new StringBuilder();
 
-        // Set confidence thresholds
         double captionConfidenceThreshold = 0.5;
         double tagConfidenceThreshold = 0.65;
 
-        // Filter and sort captions
+        // Filter captions
         List<DenseCaption> filteredCaptions = result.getDenseCaptions().getValues().stream()
-                .filter(caption -> caption.getConfidence() >= captionConfidenceThreshold)
-                .sorted((c1, c2) -> Double.compare(c2.getConfidence(), c1.getConfidence()))
-                .collect(Collectors.toList());
+            .filter(c -> c.getConfidence() >= captionConfidenceThreshold)
+            .sorted((c1, c2) -> Double.compare(c2.getConfidence(), c1.getConfidence()))
+            .collect(Collectors.toList());
 
-        // Filter and sort tags
+        // Filter tags
         List<DetectedTag> filteredTags = result.getTags().getValues().stream()
-                .filter(tag -> tag.getConfidence() >= tagConfidenceThreshold)
-                .sorted((t1, t2) -> Double.compare(t2.getConfidence(), t1.getConfidence()))
-                .collect(Collectors.toList());
+            .filter(t -> t.getConfidence() >= tagConfidenceThreshold)
+            .sorted((t1, t2) -> Double.compare(t2.getConfidence(), t1.getConfidence()))
+            .collect(Collectors.toList());
 
+        // Build analysis text with captions
         sb.append("Here are descriptions of different aspects of the image:\n");
         int count = 1;
         for (DenseCaption denseCaption : filteredCaptions) {
             sb.append(count++).append(". ").append(denseCaption.getText()).append("\n");
-            System.out.println(denseCaption.getText() + " " + denseCaption.getConfidence());
-        }
-
-        // Extract tags
-        List<String> tags = new ArrayList<>();
-        for (DetectedTag tag : filteredTags) {
-            tags.add(tag.getName());
-            System.out.println(tag.getName() + ": " + tag.getConfidence());
-        }
-
-        // Figure out what words existed
-        List<String> words = new ArrayList<>();
-        for (DetectedTextBlock currentBlock : result.getRead().getBlocks()) {
-            for (DetectedTextLine line : currentBlock.getLines()) {
-                // We will add sentences at a time
-                words.add(line.getText());
-                System.out.println(line.getText());
-            }
         }
 
         // Combine tags
-        sb.append("\nHere is a list of different parts of the image:\n");
-        sb.append(String.join(", ", tags));
+        if (!filteredTags.isEmpty()) {
+            sb.append("\nHere is a list of different parts of the image:\n");
+            List<String> tags = filteredTags.stream().map(DetectedTag::getName).collect(Collectors.toList());
+            sb.append(String.join(", ", tags));
+        }
 
-        // Combine any text (specifically looking for brands)
+        // Extract text (e.g., brand names or other text)
+        List<String> words = new ArrayList<>();
+        if (result.getRead() != null && result.getRead().getBlocks() != null) {
+            for (DetectedTextBlock block : result.getRead().getBlocks()) {
+                for (DetectedTextLine line : block.getLines()) {
+                    words.add(line.getText());
+                }
+            }
+        }
         if (!words.isEmpty()) {
             sb.append("\n\nText found within the image:\n");
             sb.append(String.join(", ", words));
         }
 
+        // Ensure prompt is not too large
         String analysisText = sb.toString();
-
-        // Ensure input text is not overly long
         if (analysisText.length() > 3000) {
             analysisText = analysisText.substring(0, 3000);
         }
 
-        // Modify system message
-        String systemMessage = "You are an AI assistant specialized in generating accurate, concise, and descriptive captions for images based on provided visual descriptions, tags, and detected text. Your goal is to create a single sentence that best represents the main content of the image.";
+        // System message (guiding the AI)
+        String systemMessage = "You are an AI assistant specialized in generating accurate, concise, " +
+            "and descriptive captions for images based on provided visual descriptions, tags, and detected text. " +
+            "Your goal is to create a single sentence that best represents the main content of the image.";
 
-        // Construct the prompt
-        String promptText = "Based on the following information, generate a concise and descriptive caption for the image in one sentence. Focus on the main content, include any brands or text detected, and avoid adding any information not present in the data. Keep it under 200 characters.\n\n"
-                + analysisText;
+        // User prompt
+        String promptText = "Based on the following information, generate a concise and descriptive " +
+            "caption for the image in one sentence. Focus on the main content, include any brands or text " +
+            "detected, and avoid adding any information not present in the data. Keep it under 200 characters.\n\n" +
+            analysisText;
 
-        // Create the chat messages
+        // Create messages for the Chat Completions
         List<ChatRequestMessage> messages = new ArrayList<>();
         messages.add(new ChatRequestSystemMessage(systemMessage));
         messages.add(new ChatRequestUserMessage(promptText));
 
-        // Set up the options
+        // Configure OpenAI chat settings
         ChatCompletionsOptions options = new ChatCompletionsOptions(messages);
-        options.setMaxTokens(200).setTemperature(.5);
+        options.setMaxTokens(200).setTemperature(0.5);
 
-        // Get the response
+        // Request a response from OpenAI
         ChatCompletions chatCompletions = chatGpt.getChatCompletions(deploymentOrModelId, options);
-
         String finalCaption = chatCompletions.getChoices().get(0).getMessage().getContent().trim();
 
-        // Truncate if necessary
-        finalCaption = finalCaption.length() > 255 ? finalCaption.substring(0, 255) : finalCaption;
-
-        return finalCaption;
+        // Truncate if needed
+        return finalCaption.length() > 255 ? finalCaption.substring(0, 255) : finalCaption;
     }
 
+    /**
+     * Creates a ZIP file with processed image data. Each image will be renamed
+     * using the provided captions (if valid), sanitized to avoid invalid filename characters.
+     *
+     * @param imageNames    a list of captions/names corresponding to each image
+     * @param originalFiles the original image files
+     * @return a byte array representing the contents of the ZIP file
+     * @throws IOException if an I/O error occurs during ZIP creation
+     */
     @Override
     public byte[] createZip(List<String> imageNames, List<MultipartFile> originalFiles) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -245,48 +261,45 @@ public class ImageServiceImpl implements ImageService {
     }
 
     /**
-     * Sanitizes the filename by removing invalid characters, adjusting punctuation,
+     * Sanitizes a filename by removing invalid characters, adjusting punctuation,
      * and limiting its length.
      *
-     * @param filename
-     *        The original filename.
-     * @return The sanitized filename.
+     * @param filename the original filename or caption
+     * @return a clean filename ready for use in the ZIP
      */
     private String sanitizeFileName(String filename) {
         if (filename == null || filename.isEmpty()) {
             return "image.png";
         }
 
-        // Step 1: Trim whitespace and remove any leading and trailing quotes
+        // Trim whitespace and remove leading/trailing quotes
         String sanitized = filename.trim().replaceAll("^\"|\"$", "");
 
-        // Step 2: Replace sequences of punctuation between sentences with a single
-        // comma
+        // Replace punctuation between sentences with a comma
         sanitized = sanitized.replaceAll("[.!?]+(?=\\s|$)", ",");
 
-        // Step 3: Remove any remaining punctuation at the end of the filename
+        // Remove any trailing punctuation
         sanitized = sanitized.replaceAll("[,\\s]+$", "");
 
-        // Step 4: Replace other punctuation (like &, @, #, etc.) with spaces
+        // Replace other punctuation (like &, @, #, etc.) with spaces
         sanitized = sanitized.replaceAll("[^a-zA-Z0-9\\s_-]", " ");
 
-        // Step 5: Replace multiple spaces or commas with a single space
-        sanitized = sanitized.replaceAll("\\s+", " ").replaceAll(",+", ",").trim();
+        // Collapse multiple spaces
+        sanitized = sanitized.replaceAll("\\s+", " ").trim();
 
-        // Step 6: Ensure the filename is not empty
+        // Fall back if empty
         if (sanitized.isEmpty()) {
             sanitized = "image";
         }
 
-        // Step 7: Limit filename length to 200 characters
+        // Limit filename length
         if (sanitized.length() > 200) {
             sanitized = sanitized.substring(0, 200).trim();
         }
 
-        // Step 8: Append ".png" extension
+        // Append PNG extension
         sanitized += ".png";
 
         return sanitized;
     }
-
 }

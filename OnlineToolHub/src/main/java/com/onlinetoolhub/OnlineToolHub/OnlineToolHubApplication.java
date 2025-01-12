@@ -6,14 +6,15 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
 /**
- * Main class for the Alt Text application.
+ * Main entry point for the Online Tool Hub application.
  */
 @SpringBootApplication
 public class OnlineToolHubApplication {
 
     /**
-     * Returns the ModelMapper bean.
-     * @return the ModelMapper for the application.
+     * Creates and configures a {@link ModelMapper} bean used for object mapping.
+     *
+     * @return a configured instance of ModelMapper
      */
     @Bean
     public ModelMapper modelMapper() {
@@ -21,12 +22,11 @@ public class OnlineToolHubApplication {
     }
 
     /**
-     * Starts the Alt Text application.
-     * @param args command line arguments
+     * Main method that runs the Spring Boot application.
+     *
+     * @param args command-line arguments
      */
     public static void main(String[] args) {
         SpringApplication.run(OnlineToolHubApplication.class, args);
     }
-
 }
-
